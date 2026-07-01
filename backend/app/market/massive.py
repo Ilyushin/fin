@@ -21,7 +21,9 @@ class MassiveClient(MarketDataProvider):
     def __init__(self, tickers: list[str]):
         self._api_key = os.environ["MASSIVE_API_KEY"]
         self._tickers = tickers
-        self._poll_interval = float(os.environ.get("MASSIVE_POLL_INTERVAL", DEFAULT_POLL_INTERVAL))
+        self._poll_interval = float(
+            os.environ.get("MASSIVE_POLL_INTERVAL", DEFAULT_POLL_INTERVAL)
+        )
         self._task: asyncio.Task | None = None
         self._client: httpx.AsyncClient | None = None
 
@@ -54,14 +56,18 @@ class MassiveClient(MarketDataProvider):
         try:
             resp = await self._client.get(url, params=params)
             resp.raise_for_status()
-            data = resp.json()
-
-            for item in data.get("tickers", []):
-                ticker = item.get("ticker")
-                last_trade = item.get("lastTrade", {})
-                price = last_trade.get("p")
-                if ticker and price is not None:
-                    price_cache.update(ticker, float(price))
-
+            for ticker, price in parse_snapshot(resp.json()):
+                price_cache.update(ticker, price)
         except httpx.HTTPError as e:
             logger.error("Massive API poll failed: %s", e)
+
+
+def parse_snapshot(data: dict) -> list[tuple[str, float]]:
+    """Parse a Polygon.io snapshot response into (ticker, price) pairs."""
+    result = []
+    for item in data.get("tickers", []):
+        ticker = item.get("ticker")
+        price = item.get("lastTrade", {}).get("p")
+        if ticker and price is not None:
+            result.append((ticker, float(price)))
+    return result
